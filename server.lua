@@ -4,7 +4,10 @@ if not Config or not Config.EvidenceStorage or not Config.EvidenceStorage.Enable
 end
 
 local storages = {}
-local withdrawGrade = 7
+
+local evidenceItem = Config.EvidenceStorage.EvidenceItem or 'police_evidence'
+local evidenceLabel = Config.EvidenceStorage.EvidenceLabel or 'Evidence'
+local withdrawGrade = Config.EvidenceStorage.WithdrawGrade or 7
 
 local function getPlayer(src)
     return exports.qbx_core:GetPlayer(src)
@@ -38,7 +41,7 @@ local function getPrice(item)
         return list[item].price
     end
 
-    return (list.DEFAULT and list.DEFAULT.price) or 0
+    return 0
 end
 
 local function getCops()
@@ -47,6 +50,7 @@ local function getCops()
 
     for id, player in pairs(players) do
         local job = player.PlayerData and player.PlayerData.job
+
         if job and job.name == 'police' and job.onduty then
             cops[#cops + 1] = tonumber(id)
         end
@@ -66,7 +70,7 @@ local function getValue(stash)
     local total = 0
 
     for _, item in pairs(inv.items) do
-        if item and item.name and item.count > 0 then
+        if item and item.name and item.count and item.count > 0 then
             total = total + (getPrice(item.name) * item.count)
         end
     end
@@ -78,14 +82,14 @@ end
 
 local function clear(stash, items)
     for _, item in pairs(items) do
-        if item and item.slot and item.count > 0 then
+        if item and item.slot and item.count and item.count > 0 then
             exports.ox_inventory:RemoveItem(stash, item.name, item.count, item.metadata, item.slot)
         end
     end
 end
 
 local function format(num)
-    return tostring(num):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+    return tostring(num):reverse():gsub('(%d%d%d)', '%1,'):reverse():gsub('^,', '')
 end
 
 local function pay(total)
@@ -103,10 +107,10 @@ local function pay(total)
         local player = getPlayer(src)
 
         if player and player.Functions then
-            player.Functions.AddMoney('bank', split, 'evidence')
+            player.Functions.AddMoney('bank', split, 'evidence-payout')
 
             TriggerClientEvent('jp-evidence:client:notify', src, {
-                title = 'Evidence',
+                title = evidenceLabel,
                 description = ('£%s received\nTotal: £%s'):format(fSplit, fTotal),
                 type = 'success',
                 position = 'top',
@@ -137,7 +141,7 @@ local function process(zone)
 end
 
 CreateThread(function()
-    for zone in pairs(Config.EvidenceStorage.Zones) do
+    for zone in pairs(Config.EvidenceStorage.Zones or {}) do
         local stash = ('pdbonus_%s'):format(zone)
 
         storages[zone] = {
@@ -145,11 +149,19 @@ CreateThread(function()
             busy = false
         }
 
+        exports.ox_inventory:RegisterStash(
+            stash,
+            evidenceLabel,
+            Config.EvidenceStorage.Slots or 50,
+            Config.EvidenceStorage.Weight or 100000,
+            false
+        )
+
         print('[jp-evidence] ready: ' .. stash)
 
         CreateThread(function()
             while true do
-                Wait(Config.EvidenceStorage.AutoBonusPayoutTimer)
+                Wait(Config.EvidenceStorage.AutoBonusPayoutTimer or 60000)
                 process(zone)
             end
         end)
@@ -164,12 +176,13 @@ exports.ox_inventory:registerHook('swapItems', function(payload)
     if type(id) == 'string' and id:find('pdbonus_') then
         if not canWithdraw(src) then
             TriggerClientEvent('jp-evidence:client:notify', src, {
-                title = 'Evidence',
+                title = evidenceLabel,
                 description = 'Rank too low to withdraw',
                 type = 'error',
                 position = 'top',
                 icon = 'ban'
             })
+
             return false
         end
     end
@@ -183,6 +196,7 @@ RegisterCommand('processevidence', function(src, args)
     if src ~= 0 then return end
 
     local zone = args[1]
+
     if not zone then
         print('processevidence [zone]')
         return
